@@ -16,10 +16,11 @@ const (
 )
 
 type param struct {
-	Name   string
-	Flags  uint8
-	ti     typeInfo
-	buffer []byte
+	Name     string
+	Flags    uint8
+	ti       typeInfo
+	buffer   []byte
+	declSize int
 }
 
 var (

@@ -123,6 +123,8 @@ func (c *Conn) CheckNamedValue(nv *driver.NamedValue) error {
 		sqlexp.ReturnMessageInit(v)
 		c.outs.msgq = v
 		return driver.ErrRemoveArgument
+	case ExtParam:
+		return nil
 	default:
 		var err error
 		nv.Value, err = convertInputParameter(nv.Value)
@@ -130,7 +132,8 @@ func (c *Conn) CheckNamedValue(nv *driver.NamedValue) error {
 	}
 }
 
-func (s *Stmt) makeParamExtra(val driver.Value) (res param, err error) {
+func makeParamExtra(val driver.Value, stmt *Stmt) (res param, err error) {
+
 	switch val := val.(type) {
 	case VarChar:
 		res.ti.TypeId = typeBigVarChar
@@ -169,7 +172,7 @@ func (s *Stmt) makeParamExtra(val driver.Value) (res param, err error) {
 		res.buffer = encodeTime(val.Hour, val.Minute, val.Second, val.Nanosecond, int(res.ti.Scale))
 		res.ti.Size = len(res.buffer)
 	case sql.Out:
-		res, err = s.makeParam(val.Dest)
+		res, err = stmt.makeParam(val.Dest)
 		res.Flags = fByRevValue
 	case TVP:
 		err = val.check()
@@ -198,6 +201,10 @@ func (s *Stmt) makeParamExtra(val driver.Value) (res param, err error) {
 		err = fmt.Errorf("mssql: unknown type for %T", val)
 	}
 	return
+}
+
+func (s *Stmt) makeParamExtra(val driver.Value) (res param, err error) {
+	return makeParamExtra(&val, s)
 }
 
 func scanIntoOut(name string, fromServer, scanInto interface{}) error {

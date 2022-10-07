@@ -23,9 +23,9 @@ import (
 
 // ReturnStatus may be used to return the return value from a proc.
 //
-//   var rs mssql.ReturnStatus
-//   _, err := db.Exec("theproc", &rs)
-//   log.Printf("return status = %d", rs)
+//	var rs mssql.ReturnStatus
+//	_, err := db.Exec("theproc", &rs)
+//	log.Printf("return status = %d", rs)
 type ReturnStatus int32
 
 var driverInstance = &Driver{processQueryText: true}
@@ -642,7 +642,14 @@ func (s *Stmt) makeRPCParams(args []namedValue, isProc bool) ([]param, []string,
 		if isOutputValue(val.Value) {
 			output = outputSuffix
 		}
-		decls[i] = fmt.Sprintf("%s %s%s", name, makeDecl(params[i+offset].ti), output)
+
+		// Create a custom type info just for creating variable declaration
+		custTi := params[i+offset].ti
+		if decsz := params[i+offset].declSize; decsz > 0 {
+			custTi.Size = decsz
+		}
+
+		decls[i] = fmt.Sprintf("%s %s%s", name, makeDecl(custTi), output)
 
 	}
 	return params, decls, nil
@@ -877,12 +884,13 @@ func (r *Rows) ColumnTypeDatabaseTypeName(index int) string {
 // not a variable length type ok should return false.
 // If length is not limited other than system limits, it should return math.MaxInt64.
 // The following are examples of returned values for various types:
-//   TEXT          (math.MaxInt64, true)
-//   varchar(10)   (10, true)
-//   nvarchar(10)  (10, true)
-//   decimal       (0, false)
-//   int           (0, false)
-//   bytea(30)     (30, true)
+//
+//	TEXT          (math.MaxInt64, true)
+//	varchar(10)   (10, true)
+//	nvarchar(10)  (10, true)
+//	decimal       (0, false)
+//	int           (0, false)
+//	bytea(30)     (30, true)
 func (r *Rows) ColumnTypeLength(index int) (int64, bool) {
 	return makeGoLangTypeLength(r.cols[index].ti)
 }
@@ -890,9 +898,10 @@ func (r *Rows) ColumnTypeLength(index int) (int64, bool) {
 // It should return
 // the precision and scale for decimal types. If not applicable, ok should be false.
 // The following are examples of returned values for various types:
-//   decimal(38, 4)    (38, 4, true)
-//   int               (0, 0, false)
-//   decimal           (math.MaxInt64, math.MaxInt64, true)
+//
+//	decimal(38, 4)    (38, 4, true)
+//	int               (0, 0, false)
+//	decimal           (math.MaxInt64, math.MaxInt64, true)
 func (r *Rows) ColumnTypePrecisionScale(index int) (int64, int64, bool) {
 	return makeGoLangTypePrecisionScale(r.cols[index].ti)
 }
@@ -914,13 +923,14 @@ func makeStrParam(val string) (res param) {
 	return
 }
 
-func (s *Stmt) makeParam(val driver.Value) (res param, err error) {
+func makeParam(val driver.Value, stmt *Stmt) (res param, err error) {
 	if val == nil {
 		res.ti.TypeId = typeNull
 		res.buffer = nil
 		res.ti.Size = 0
 		return
 	}
+
 	switch val := val.(type) {
 	case int:
 		res.ti.TypeId = typeIntN
@@ -997,20 +1007,37 @@ func (s *Stmt) makeParam(val driver.Value) (res param, err error) {
 		res.buffer = []byte{}
 
 	case time.Time:
-		if s.c.sess.loginAck.TDSVersion >= verTDS73 {
-			res.ti.TypeId = typeDateTimeOffsetN
-			res.ti.Scale = 7
-			res.buffer = encodeDateTimeOffset(val, int(res.ti.Scale))
-			res.ti.Size = len(res.buffer)
-		} else {
-			res.ti.TypeId = typeDateTimeN
-			res.buffer = encodeDateTime(val)
-			res.ti.Size = len(res.buffer)
+
+		if stmt != nil {
+			if stmt.c.sess.loginAck.TDSVersion >= verTDS73 {
+				res.ti.TypeId = typeDateTimeOffsetN
+				res.ti.Scale = 7
+				res.buffer = encodeDateTimeOffset(val, int(res.ti.Scale))
+				res.ti.Size = len(res.buffer)
+				break
+			}
 		}
+
+		res.ti.TypeId = typeDateTimeN
+		res.buffer = encodeDateTime(val)
+		res.ti.Size = len(res.buffer)
 	default:
-		return s.makeParamExtra(val)
+		if stmt != nil {
+			return stmt.makeParamExtra(val)
+		}
+		return makeParamExtra(val, nil)
 	}
+
 	return
+}
+
+func (s *Stmt) makeParam(val driver.Value) (res param, err error) {
+	switch t := val.(type) {
+	case ExtParam:
+		return makeExtParam(t), nil
+	}
+
+	return makeParam(val, s)
 }
 
 type Result struct {
@@ -1319,12 +1346,13 @@ func (r *Rowsq) ColumnTypeDatabaseTypeName(index int) string {
 // not a variable length type ok should return false.
 // If length is not limited other than system limits, it should return math.MaxInt64.
 // The following are examples of returned values for various types:
-//   TEXT          (math.MaxInt64, true)
-//   varchar(10)   (10, true)
-//   nvarchar(10)  (10, true)
-//   decimal       (0, false)
-//   int           (0, false)
-//   bytea(30)     (30, true)
+//
+//	TEXT          (math.MaxInt64, true)
+//	varchar(10)   (10, true)
+//	nvarchar(10)  (10, true)
+//	decimal       (0, false)
+//	int           (0, false)
+//	bytea(30)     (30, true)
 func (r *Rowsq) ColumnTypeLength(index int) (int64, bool) {
 	return makeGoLangTypeLength(r.cols[index].ti)
 }
@@ -1332,9 +1360,10 @@ func (r *Rowsq) ColumnTypeLength(index int) (int64, bool) {
 // It should return
 // the precision and scale for decimal types. If not applicable, ok should be false.
 // The following are examples of returned values for various types:
-//   decimal(38, 4)    (38, 4, true)
-//   int               (0, 0, false)
-//   decimal           (math.MaxInt64, math.MaxInt64, true)
+//
+//	decimal(38, 4)    (38, 4, true)
+//	int               (0, 0, false)
+//	decimal           (math.MaxInt64, math.MaxInt64, true)
 func (r *Rowsq) ColumnTypePrecisionScale(index int) (int64, int64, bool) {
 	return makeGoLangTypePrecisionScale(r.cols[index].ti)
 }

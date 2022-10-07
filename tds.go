@@ -1132,7 +1132,7 @@ initiate_connection:
 		var config *tls.Config
 		if pc := p.TLSConfig; pc != nil {
 			config = pc
-			if config.DynamicRecordSizingDisabled == false {
+			if !config.DynamicRecordSizingDisabled {
 				config = config.Clone()
 
 				// fix for https://github.com/microsoft/go-mssqldb/issues/166
